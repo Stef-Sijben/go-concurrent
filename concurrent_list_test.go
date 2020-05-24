@@ -1,3 +1,9 @@
+// Tests for a concurrent list used sequentially.
+// Based on the unit tests for container.List, slightly adjusted and expanded.
+//
+// This file incorporates work covered by the following copyright and
+// permission notice:
+//
 // Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.

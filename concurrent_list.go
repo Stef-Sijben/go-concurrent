@@ -1,3 +1,13 @@
+// Concurrent doubly-linked list based on container.List.
+// Code heavily inspired by the original.
+//
+// This file incorporates work covered by the following copyright and
+// permission notice:
+//
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package concurrent
 
 import (
@@ -8,10 +18,6 @@ import (
 // Element is an element of a linked list.
 type Element struct {
 	// Next and previous pointers in the doubly-linked list of elements.
-	// To simplify the implementation, internally a list l is implemented
-	// as a ring, such that &l.root is both the next element of the last
-	// list element (l.Back()) and the previous element of the first list
-	// element (l.Front()).
 	next, prev *Element
 
 	// The list to which this element belongs.

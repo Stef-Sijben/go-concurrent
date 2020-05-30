@@ -105,7 +105,6 @@ func (l *List) Init() *List {
 // New returns an initialized list.
 func New() *List {
 	l := new(List)
-	// Initialise these only at creation, they should never change
 	return l.lazyInit(false)
 }
 
@@ -145,73 +144,115 @@ func (l *List) Back() *Element {
 	return l.tail.prev
 }
 
-// insert inserts e after at, increments l.len, and returns e.
-func (l *List) insertAfter(e, at *Element) *Element {
+// insertAfter inserts range [first, last] after at, increments l.len, and returns first.
+// Elements in inserted range must not be accessed simultaneously.
+func (l *List) insertAfter(first, last, at *Element) (*Element, bool) {
+	nAdded := 1
+	for e := first; e != last; e = e.next {
+		e.list = l
+		nAdded++
+	}
+	last.list = l
+
 	at.mutex.Lock()
 	defer at.mutex.Unlock()
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
+	first.mutex.Lock()
+	defer first.mutex.Unlock()
+	if last != first {
+		last.mutex.Lock()
+		defer last.mutex.Unlock()
+	}
 	n := at.next
+	if at.list != l || n == nil {
+		// at is no longer in l, so we can't insert after it
+		return nil, false
+	}
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 
-	at.next = e
-	e.prev = at
-	e.next = n
-	n.prev = e
-	e.list = l
-	atomic.AddInt64(&l.len, 1)
-	return e
+	at.next = first
+	first.prev = at
+	last.next = n
+	n.prev = last
+	atomic.AddInt64(&l.len, int64(nAdded))
+	return first, true
 }
 
 // insertValue is a convenience wrapper for insert(&Element{Value: v}, at).
-func (l *List) insertValueAfter(v interface{}, at *Element) *Element {
-	return l.insertAfter(&Element{Value: v}, at)
+func (l *List) insertValueAfter(v interface{}, at *Element) (*Element, bool) {
+	e := &Element{Value: v}
+	return l.insertAfter(e, e, at)
 }
 
-// insert inserts e before at, increments l.len, and returns e.
-func (l *List) insertBefore(e, at *Element) *Element {
-	p := at.prev
-	for ; ; p = at.prev {
-		p.mutex.Lock()
-		if p.next == at {
-			defer p.mutex.Unlock()
-			break
-		}
-		// at got a new predecessor before we got the lock, try again
-		p.mutex.Unlock()
-	}
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-	at.mutex.Lock()
-	defer at.mutex.Unlock()
-
-	p.next = e
-	e.prev = p
-	e.next = at
-	at.prev = e
-	e.list = l
-	atomic.AddInt64(&l.len, 1)
-	return e
-}
-
-// insertValue is a convenience wrapper for insert(&Element{Value: v}, at).
-func (l *List) insertValueBefore(v interface{}, at *Element) *Element {
-	return l.insertBefore(&Element{Value: v}, at)
-}
-
-// remove removes e from its list, decrements l.len, and returns e.
-func (l *List) remove(e *Element) *Element {
+// Returns the predecessor of e in l in a thread safe way.
+// The returned element, if not nil, is locked for writing.
+func (l *List) predecessor(e *Element) *Element {
+	e.mutex.RLock()
 	p := e.prev
-	for ; ; p = e.prev {
+	for ; e.list == l && p != nil; p = e.prev {
+		// We must unlock here to avoid deadlock: Always lock head-to-tail
+		e.mutex.RUnlock()
 		p.mutex.Lock()
 		if p.next == e {
-			defer p.mutex.Unlock()
-			break
+			return p
 		}
 		// We got a new predecessor before we got the lock, try again
 		p.mutex.Unlock()
+		e.mutex.RLock()
 	}
+	// If the loop terminates without returning, e was removed from l
+	e.mutex.RUnlock()
+	return nil
+}
+
+// insertBefore inserts range [first, last] before at, increments l.len.
+// Returns the last inserted element, if any, and whether insertion was successful.
+// Elements in inserted range must not be accessed simultaneously.
+func (l *List) insertBefore(first, last, at *Element) (*Element, bool) {
+	nAdded := 1
+	for e := first; e != last; e = e.next {
+		e.list = l
+		nAdded++
+	}
+	last.list = l
+
+	p := l.predecessor(at)
+	if p == nil {
+		// at is no longer in l, so we can't insert before it
+		return nil, false
+	}
+	defer p.mutex.Unlock()
+	first.mutex.Lock()
+	defer first.mutex.Unlock()
+	if last != first {
+		last.mutex.Lock()
+		defer last.mutex.Unlock()
+	}
+	at.mutex.Lock()
+	defer at.mutex.Unlock()
+
+	p.next = first
+	first.prev = p
+	last.next = at
+	at.prev = last
+	atomic.AddInt64(&l.len, int64(nAdded))
+	return last, true
+}
+
+// insertValue is a convenience wrapper for insert(&Element{Value: v}, at).
+func (l *List) insertValueBefore(v interface{}, at *Element) (*Element, bool) {
+	e := &Element{Value: v}
+	return l.insertBefore(e, e, at)
+}
+
+// remove removes e from its list, decrements l.len. Returns e and whether this call removed it.
+func (l *List) remove(e *Element) (*Element, bool) {
+	p := l.predecessor(e)
+	if p == nil {
+		// Someone else already deleted e for us, we're done
+		return e, false
+	}
+	defer p.mutex.Unlock()
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 	n := e.next
@@ -224,77 +265,100 @@ func (l *List) remove(e *Element) *Element {
 	e.next = nil // avoid memory leaks
 	e.prev = nil // avoid memory leaks
 	e.list = nil
-	return e
+	return e, true
+}
+
+// move moves e to next to at and returns e and whether move succeeded.
+func (l *List) moveAfter(e, at *Element) (*Element, bool) {
+	// Optimize away no-op moves
+	if e == at {
+		return e, true
+	}
+	at.mutex.RLock()
+	if at.next == e {
+		at.mutex.RUnlock()
+		return e, true
+	}
+	if at.list != l {
+		at.mutex.RUnlock()
+		return e, false
+	}
+	at.mutex.RUnlock()
+	// TODO: race condition if at is removed from l between here and inserting e
+	// e will be removed from l and not inserted again
+
+	_, ok := l.remove(e)
+	if ok {
+		_, ok = l.insertAfter(e, e, at)
+	}
+	return e, ok
 }
 
 // move moves e to next to at and returns e.
-func (l *List) moveAfter(e, at *Element) *Element {
-	// TODO: optimize away no-op moves?
+func (l *List) moveBefore(e, at *Element) (*Element, bool) {
+	// Optimize away no-op moves
 	if e == at {
-		return e
+		return e, true
 	}
-
-	l.remove(e)
-	l.insertAfter(e, at)
-	return e
-}
-
-// move moves e to next to at and returns e.
-func (l *List) moveBefore(e, at *Element) *Element {
-	// TODO: optimize away no-op moves?
-	if e == at {
-		return e
+	at.mutex.RLock()
+	if at.prev == e {
+		at.mutex.RUnlock()
+		return e, true
 	}
+	if at.list != l {
+		at.mutex.RUnlock()
+		return e, false
+	}
+	at.mutex.RUnlock()
+	// TODO: race condition if at is removed from l between here and inserting e
+	// e will be removed from l and not inserted again
 
-	l.remove(e)
-	l.insertBefore(e, at)
-	return e
+	_, ok := l.remove(e)
+	if ok {
+		_, ok = l.insertBefore(e, e, at)
+	}
+	return e, ok
 }
 
 // Remove removes e from l if e is an element of list l.
 // It returns the element value e.Value.
 // The element must not be nil.
 func (l *List) Remove(e *Element) interface{} {
-	if e.list == l {
-		// if e.list == l, l must have been initialized when e was inserted
-		// in l or l == nil (e is a zero Element) and l.remove will crash
-		l.remove(e)
+	l.lazyInit(false)
+	e, ok := l.remove(e)
+	if ok {
+		return e.Value
 	}
-	return e.Value
+	return nil
 }
 
 // PushFront inserts a new element e with value v at the front of list l and returns e.
 func (l *List) PushFront(v interface{}) *Element {
-	l.lazyInit(false)
-	return l.insertValueAfter(v, &l.head)
+	return l.InsertAfter(v, &l.head)
 }
 
 // PushBack inserts a new element e with value v at the back of list l and returns e.
 func (l *List) PushBack(v interface{}) *Element {
-	l.lazyInit(false)
-	return l.insertValueBefore(v, &l.tail)
+	return l.InsertBefore(v, &l.tail)
 }
 
 // InsertBefore inserts a new element e with value v immediately before mark and returns e.
 // If mark is not an element of l, the list is not modified.
 // The mark must not be nil.
 func (l *List) InsertBefore(v interface{}, mark *Element) *Element {
-	if mark.list != l {
-		return nil
-	}
 	// see comment in List.Remove about initialization of l
-	return l.insertValueBefore(v, mark)
+	l.lazyInit(false)
+	e, _ := l.insertValueBefore(v, mark)
+	return e
 }
 
 // InsertAfter inserts a new element e with value v immediately after mark and returns e.
 // If mark is not an element of l, the list is not modified.
 // The mark must not be nil.
 func (l *List) InsertAfter(v interface{}, mark *Element) *Element {
-	if mark.list != l {
-		return nil
-	}
-	// see comment in List.Remove about initialization of l
-	return l.insertValueAfter(v, mark)
+	l.lazyInit(false)
+	e, _ := l.insertValueAfter(v, mark)
+	return e
 }
 
 // MoveToFront moves element e to the front of list l.
@@ -323,9 +387,6 @@ func (l *List) MoveToBack(e *Element) {
 // If e or mark is not an element of l, or e == mark, the list is not modified.
 // The element and mark must not be nil.
 func (l *List) MoveBefore(e, mark *Element) {
-	if e.list != l || e == mark || mark.list != l {
-		return
-	}
 	l.moveBefore(e, mark)
 }
 
@@ -333,28 +394,34 @@ func (l *List) MoveBefore(e, mark *Element) {
 // If e or mark is not an element of l, or e == mark, the list is not modified.
 // The element and mark must not be nil.
 func (l *List) MoveAfter(e, mark *Element) {
-	if e.list != l || e == mark || mark.list != l {
-		return
-	}
 	l.moveAfter(e, mark)
+}
+
+func (l *List) copyListElements() (*Element, *Element) {
+	// TODO: Deal with modification of l during iteration
+	tmp := New()
+	for e := l.Front(); e != nil; e = e.Next() {
+		tmp.insertValueBefore(e.Value, &tmp.tail)
+	}
+	return tmp.Front(), tmp.Back()
 }
 
 // PushBackList inserts a copy of an other list at the back of list l.
 // The lists l and other may be the same. They must not be nil.
 func (l *List) PushBackList(other *List) {
-	// TODO: Make atomic
 	l.lazyInit(false)
-	for i, e := other.Len(), other.Front(); i > 0; i, e = i-1, e.Next() {
-		l.insertValueBefore(e.Value, &l.tail)
+	first, last := other.copyListElements()
+	if first != nil && last != nil {
+		l.insertBefore(first, last, &l.tail)
 	}
 }
 
 // PushFrontList inserts a copy of an other list at the front of list l.
 // The lists l and other may be the same. They must not be nil.
 func (l *List) PushFrontList(other *List) {
-	// TODO: Make atomic
 	l.lazyInit(false)
-	for i, e := other.Len(), other.Back(); i > 0; i, e = i-1, e.Prev() {
-		l.insertValueAfter(e.Value, &l.head)
+	first, last := other.copyListElements()
+	if first != nil && last != nil {
+		l.insertAfter(first, last, &l.head)
 	}
 }

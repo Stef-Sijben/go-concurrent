@@ -90,8 +90,8 @@ func (l *list) insertFront(e *element) {
 
 // Asynchronous front insertion worker
 func (l *list) frontInserter() {
-	for {
-		l.insertFront(<-l.pendingInsertions)
+	for e := range l.pendingInsertions {
+		l.insertFront(e)
 	}
 }
 
@@ -126,10 +126,10 @@ func (l *list) remove(e *element, validateList bool, newList *list) (*element, b
 	}
 	defer p.mutex.Unlock()
 	e.mutex.Lock()
+	defer e.mutex.Unlock()
 	if validateList && e.list != l {
 		return e, false
 	}
-	defer e.mutex.Unlock()
 	n := e.next
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
@@ -146,7 +146,6 @@ func (l *list) remove(e *element, validateList bool, newList *list) (*element, b
 	n.prev = p
 	e.next = nil
 	e.prev = nil
-	e.list = newList
 	return e, true
 }
 

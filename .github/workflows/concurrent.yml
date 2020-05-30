@@ -1,10 +1,14 @@
-name: Go
+name: concurrent
 
 on:
   push:
     branches: [ master ]
+    paths-ignore: 
+    - 'lru/**'
   pull_request:
     branches: [ master ]
+    paths-ignore: 
+    - 'lru/**'
 
 jobs:
 
@@ -31,7 +35,7 @@ jobs:
         fi
 
     - name: Build
-      run: go build -v .
+      run: go build -v
 
     - name: Test
-      run: go test -v .
+      run: go test -v

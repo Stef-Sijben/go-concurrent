@@ -85,7 +85,7 @@ func checkListPointers(t *testing.T, l *list, es []*element) {
 // Wait for all async insertions to finish; this enforces serialisation
 func (l *list) waitForInsertions() {
 	lp := func() int64 {
-		return atomic.LoadInt64(&l.pendingInsertions)
+		return atomic.LoadInt64(&l.nPendingInsertions)
 	}
 	for p := lp(); p > 0; p = lp() {
 	}
@@ -160,7 +160,7 @@ func TestList(t *testing.T) {
 	checkListPointers(t, l, []*element{})
 }
 
-func TestMove(t *testing.T) {
+func TestMoveBetweenLists(t *testing.T) {
 	l1 := newList()
 	e1 := l1.PushFront(1)
 	l1.waitForInsertions()

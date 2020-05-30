@@ -39,15 +39,18 @@ type list struct {
 	head, tail element
 
 	// Fixed size because of atomic access
-	len               int64
-	pendingInsertions int64 // Count async insertions waiting to be performed
+	len                int64
+	nPendingInsertions int64
+
+	pendingInsertions chan *element
 }
 
 // New returns an initialized list. Always create LRUList through New().
 func newList() *list {
 	l := new(list)
 	l.len = 0
-	l.pendingInsertions = 0
+	l.nPendingInsertions = 0
+	l.pendingInsertions = make(chan *element, 128)
 
 	l.head.prev = nil
 	l.head.list = l
@@ -57,6 +60,7 @@ func newList() *list {
 	l.tail.list = l
 	l.tail.prev = &l.head
 
+	go l.frontInserter()
 	return l
 }
 
@@ -64,7 +68,7 @@ func newList() *list {
 // The complexity is O(1).
 func (l *list) Len() int { return int(atomic.LoadInt64(&l.len)) }
 
-// insertFront asynchronously inserts e at the front of l.
+// insertFront inserts e at the front of l.
 func (l *list) insertFront(e *element) {
 	h := &l.head
 	h.mutex.Lock()
@@ -81,7 +85,14 @@ func (l *list) insertFront(e *element) {
 	n.prev = e
 	e.list = l
 
-	atomic.AddInt64(&l.pendingInsertions, -1)
+	atomic.AddInt64(&l.nPendingInsertions, -1)
+}
+
+// Asynchronous front insertion worker
+func (l *list) frontInserter() {
+	for {
+		l.insertFront(<-l.pendingInsertions)
+	}
 }
 
 // Returns the predecessor of e in l in a thread safe way.
@@ -157,8 +168,8 @@ func (l *list) PopBack() *element {
 func (l *list) PushFront(v interface{}) *element {
 	e := &element{Value: v}
 	atomic.AddInt64(&l.len, 1)
-	atomic.AddInt64(&l.pendingInsertions, 1)
-	go l.insertFront(e)
+	atomic.AddInt64(&l.nPendingInsertions, 1)
+	l.pendingInsertions <- e
 	return e
 }
 
@@ -168,8 +179,8 @@ func (l *list) PushFront(v interface{}) *element {
 func (l *list) MoveToFront(e *element) bool {
 	_, ok := l.remove(e, false, l)
 	if ok {
-		atomic.AddInt64(&l.pendingInsertions, 1)
-		go l.insertFront(e)
+		atomic.AddInt64(&l.nPendingInsertions, 1)
+		l.pendingInsertions <- e
 		return true
 	}
 	// If someone else is already moving e to front of l, that's also fine

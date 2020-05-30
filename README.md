@@ -1,4 +1,7 @@
 # go-concurrent
+![concurrent](https://github.com/Stef-Sijben/go-concurrent/workflows/concurrent/badge.svg)
+![lru](https://github.com/Stef-Sijben/go-concurrent/workflows/lru/badge.svg)
+
 Concurrent and thread safe data structures in Go
 
 The goal of this module is to provide a set of containers and other data

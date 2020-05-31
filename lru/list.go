@@ -43,6 +43,7 @@ type list struct {
 	nPendingInsertions int64
 
 	pendingInsertions chan *element
+	workers           sync.WaitGroup
 }
 
 // New returns an initialized list. Always create LRUList through New().
@@ -60,8 +61,15 @@ func newList() *list {
 	l.tail.list = l
 	l.tail.prev = &l.head
 
+	l.workers.Add(1)
 	go l.frontInserter()
 	return l
+}
+
+func (l *list) Close() {
+	// Stop the insertion workers
+	close(l.pendingInsertions)
+	l.workers.Wait()
 }
 
 // Len returns the number of elements of list l.
@@ -90,6 +98,8 @@ func (l *list) insertFront(e *element) {
 
 // Asynchronous front insertion worker
 func (l *list) frontInserter() {
+	defer l.workers.Done()
+
 	for e := range l.pendingInsertions {
 		l.insertFront(e)
 	}

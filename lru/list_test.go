@@ -96,6 +96,7 @@ func checkListPointers(t *testing.T, l *list, es []*element) {
 func TestList(t *testing.T) {
 	// Empty list
 	l := newList()
+	defer l.Close()
 	checkListPointers(t, l, []*element{})
 
 	// Single element list
@@ -154,6 +155,7 @@ func TestList(t *testing.T) {
 
 func TestMoveBetweenLists(t *testing.T) {
 	l1 := newList()
+	defer l1.Close()
 	e1 := l1.PushFront(1)
 	e2 := l1.PushFront(2)
 	e3 := l1.PushFront(3)
@@ -161,6 +163,7 @@ func TestMoveBetweenLists(t *testing.T) {
 	checkListPointers(t, l1, []*element{e4, e3, e2, e1})
 
 	l2 := newList()
+	defer l2.Close()
 	l2.MoveToFront(e2) // from middle
 	checkListPointers(t, l1, []*element{e4, e3, e1})
 	checkListPointers(t, l2, []*element{e2})

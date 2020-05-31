@@ -19,6 +19,7 @@ type LRU struct {
 	evict    *list
 	onEvict  simplelru.EvictCallback
 	cleanup  sync.Cond
+	workers  sync.WaitGroup
 }
 
 // Item is the value type of an LRU.items map
@@ -48,25 +49,44 @@ func NewWithEvict(size int, onEvict simplelru.EvictCallback) (*LRU, error) {
 		cleanup:  *sync.NewCond(new(sync.Mutex)),
 	}
 
+	c.workers.Add(1)
 	go c.cleanupWorker() // always run a cleanup worker in the background
 	return c, nil
 }
 
+// Close releases the resources used by an LRU cache
+func (c *LRU) Close() {
+	// Causes the cleanup workers to remove all entries, then exit
+	c.cleanup.L.Lock()
+	c.capacity = 0
+	c.cleanup.Broadcast()
+	c.cleanup.L.Unlock()
+
+	c.evict.Close()
+
+	// Return only when all workers are stopped
+	c.workers.Wait()
+}
+
 func (c *LRU) cleanupWorker() {
+	defer c.workers.Done()
 	c.cleanup.L.Lock()
 	defer c.cleanup.L.Unlock()
 
 	for {
-		for n := c.Len(); n > c.capacity; n = c.Len() {
-			// Claim one eviction by decrementing the counter,
-			// then we can allow other workers to test and claim
-			atomic.AddInt64(&c.len, -1)
 			c.cleanup.L.Unlock()
+
+		// Under heavy load, operate lock free (at least for the cleanup mutex)
+		for n := c.Len(); n > c.capacity; n = c.Len() {
+			// Claim one eviction by decrementing the counter
+			if !atomic.CompareAndSwapInt64(&c.len, int64(n), int64(n-1)) {
+				continue // Claim failed, try again
+			}
 
 			popElement := c.evict.PopBack()
 			if popElement == nil {
-				// Pop failed; return claimed eviction, retry later
-				atomic.AddInt64(&c.len, -1)
+				// Pop failed; return claimed eviction, try again
+				atomic.AddInt64(&c.len, 1)
 			} else {
 				popItem := popElement.Value.(*item)
 				c.items.RemoveCb(popItem.key,
@@ -80,12 +100,23 @@ func (c *LRU) cleanupWorker() {
 				if c.onEvict != nil {
 					c.onEvict(popItem.key, popItem.value)
 				}
+				popElement.Value = nil
+				popItem.evictElement = nil
 			}
 
-			c.cleanup.L.Lock()
 		}
-		// nothing to clean for now
-		c.cleanup.Wait() // condition is checked in inner loop
+
+		// Perform one final check under lock before we go to sleep or exit
+			c.cleanup.L.Lock()
+		if c.Len() > c.capacity {
+			continue // Someone inserted something before we locked, carry on
+		} else if c.capacity > 0 {
+			// Wait for something to clean up
+			c.cleanup.Wait()
+		} else {
+			// Capacity is set to 0 in Close()
+			return
+		}
 	}
 }
 
@@ -121,13 +152,13 @@ func (c *LRU) Add(key, value interface{}) bool {
 	if v.evictElement == nil {
 		// new element inserted, count it and add to evict list
 		c.cleanup.L.Lock()
-		defer c.cleanup.L.Unlock()
 		n := int(atomic.AddInt64(&c.len, 1))
+		c.cleanup.L.Unlock()
 		v.evictElement = c.evict.PushFront(v)
 		if n > c.capacity {
 			// actual cleanup happens in the background
 			c.cleanup.Signal()
-			return n > c.capacity
+			return true
 		}
 	}
 

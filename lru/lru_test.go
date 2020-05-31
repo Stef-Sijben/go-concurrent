@@ -10,6 +10,7 @@
 package lru
 
 import (
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -86,6 +87,7 @@ func TestLRU(t *testing.T) {
 	}
 
 	l, err := NewWithEvict(128, onEvicted)
+	defer l.Close()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -104,6 +106,7 @@ func TestLRU(t *testing.T) {
 	// Wait for the async tasks to finish before testing the final state
 	for atomic.LoadInt64(&evictCounter) < 128 ||
 		atomic.LoadInt64(&l.evict.nPendingInsertions) != 0 {
+		runtime.Gosched()
 	}
 	if l.Len() != 128 {
 		t.Errorf("bad len: %v", l.Len())
@@ -178,12 +181,19 @@ func TestLRUAdd(t *testing.T) {
 	}
 	for atomic.LoadInt64(&evictCounter) != 1 {
 		// test times out if the evict never happens
+		runtime.Gosched()
 	}
+
+	l.Close()
+	if len := l.Len(); len != 0 {
+		t.Errorf("Unexpected Len after Close: %d", len)
+}
 }
 
 // test that Contains doesn't update recent-ness
 func TestLRUContains(t *testing.T) {
 	l, err := New(2)
+	defer l.Close()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -203,6 +213,7 @@ func TestLRUContains(t *testing.T) {
 // test that ContainsOrAdd doesn't update recent-ness
 func TestLRUContainsOrAdd(t *testing.T) {
 	l, err := New(2)
+	defer l.Close()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -233,6 +244,7 @@ func TestLRUContainsOrAdd(t *testing.T) {
 // test that PeekOrAdd doesn't update recent-ness
 func TestLRUPeekOrAdd(t *testing.T) {
 	l, err := New(2)
+	defer l.Close()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -266,6 +278,7 @@ func TestLRUPeekOrAdd(t *testing.T) {
 // test that Peek doesn't update recent-ness
 func TestLRUPeek(t *testing.T) {
 	l, err := New(2)
+	defer l.Close()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
@@ -289,6 +302,7 @@ func TestLRUResize(t *testing.T) {
 		onEvictCounter++
 	}
 	l, err := NewWithEvict(2, onEvicted)
+	defer l.Close()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}

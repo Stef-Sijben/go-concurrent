@@ -117,18 +117,22 @@ func TestLRU(t *testing.T) {
 	// 		t.Errorf("bad key: %v", k)
 	// 	}
 	// }
-	// for i := 0; i < 128; i++ {
-	// 	_, ok := l.Get(i)
-	// 	if ok {
-	// 		t.Errorf("should be evicted")
-	// 	}
-	// }
-	// for i := 128; i < 256; i++ {
-	// 	_, ok := l.Get(i)
-	// 	if !ok {
-	// 		t.Errorf("should not be evicted")
-	// 	}
-	// }
+	for i := 0; i < 128; i++ {
+		_, ok := l.Get(strconv.Itoa(i))
+		if ok {
+			t.Errorf("should be evicted")
+		}
+	}
+	for i := 128; i < 256; i++ {
+		is := strconv.Itoa(i)
+		value, ok := l.Get(is)
+		if !ok {
+			t.Errorf("should not be evicted")
+		}
+		if value.(string) != is {
+			t.Errorf("Value is %s, expected %s", value.(string), is)
+		}
+	}
 	// for i := 128; i < 192; i++ {
 	// 	l.Remove(i)
 	// 	_, ok := l.Get(i)

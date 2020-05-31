@@ -134,9 +134,21 @@ func (c *LRU) Add(key, value interface{}) bool {
 	return false
 }
 
-// // Returns key's value from the cache and
-// // updates the "recently used"-ness of the key. #value, isFound
-// Get(key interface{}) (value interface{}, ok bool)
+// Get returns key's value from the cache and
+// updates the "recently used"-ness of the key. #value, isFound
+func (c *LRU) Get(key interface{}) (value interface{}, ok bool) {
+	keyStr, ok := key.(string)
+	if ok {
+		mapEntry, ok := c.items.Get(keyStr)
+		if ok {
+			mapItem, ok := mapEntry.(*item)
+			if ok && c.evict.MoveToFront(mapItem.evictElement) {
+				return mapItem.value, ok
+			}
+		}
+	}
+	return nil, false
+}
 
 // // Checks if a key exists in cache without updating the recent-ness.
 // Contains(key interface{}) (ok bool)

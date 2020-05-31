@@ -23,7 +23,18 @@ func checkListLen(t *testing.T, l *list, len int) bool {
 	return true
 }
 
+// Wait for all async insertions to finish; this enforces serialisation
+func (l *list) waitForInsertions() {
+	lp := func() int64 {
+		return atomic.LoadInt64(&l.nPendingInsertions)
+	}
+	for p := lp(); p > 0; p = lp() {
+	}
+}
+
 func checkListPointers(t *testing.T, l *list, es []*element) {
+	l.waitForInsertions()
+
 	head := &l.head
 	tail := &l.tail
 	n := len(es)
@@ -82,15 +93,6 @@ func checkListPointers(t *testing.T, l *list, es []*element) {
 	}
 }
 
-// Wait for all async insertions to finish; this enforces serialisation
-func (l *list) waitForInsertions() {
-	lp := func() int64 {
-		return atomic.LoadInt64(&l.nPendingInsertions)
-	}
-	for p := lp(); p > 0; p = lp() {
-	}
-}
-
 func TestList(t *testing.T) {
 	// Empty list
 	l := newList()
@@ -98,12 +100,10 @@ func TestList(t *testing.T) {
 
 	// Single element list
 	e := l.PushFront("a")
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e})
 	if !l.MoveToFront(e) {
 		t.Error("MoveToFront returned false, expected true")
 	}
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e})
 	if ep := l.PopBack(); ep != e {
 		t.Errorf("PopBack returned %p, expected %p", ep, e)
@@ -112,13 +112,9 @@ func TestList(t *testing.T) {
 
 	// Bigger list
 	e4 := l.PushFront("banana")
-	l.waitForInsertions()
 	e3 := l.PushFront(3)
-	l.waitForInsertions()
 	e2 := l.PushFront(2)
-	l.waitForInsertions()
 	e1 := l.PushFront(1)
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e1, e2, e3, e4})
 
 	if ep := l.PopBack(); ep != e4 {
@@ -127,18 +123,14 @@ func TestList(t *testing.T) {
 	checkListPointers(t, l, []*element{e1, e2, e3})
 
 	l.MoveToFront(e2) // move from middle
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e2, e1, e3})
 
 	l.MoveToFront(e3) // move from back
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e3, e2, e1})
 	l.MoveToFront(e3) // should be no-op
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e3, e2, e1})
 
 	e4 = l.PushFront(4) // insert before front
-	l.waitForInsertions()
 	checkListPointers(t, l, []*element{e4, e3, e2, e1})
 
 	// Clear all elements
@@ -163,43 +155,33 @@ func TestList(t *testing.T) {
 func TestMoveBetweenLists(t *testing.T) {
 	l1 := newList()
 	e1 := l1.PushFront(1)
-	l1.waitForInsertions()
 	e2 := l1.PushFront(2)
-	l1.waitForInsertions()
 	e3 := l1.PushFront(3)
-	l1.waitForInsertions()
 	e4 := l1.PushFront(4)
-	l1.waitForInsertions()
 	checkListPointers(t, l1, []*element{e4, e3, e2, e1})
 
 	l2 := newList()
 	l2.MoveToFront(e2) // from middle
 	checkListPointers(t, l1, []*element{e4, e3, e1})
-	l2.waitForInsertions()
 	checkListPointers(t, l2, []*element{e2})
 
 	l1.MoveToFront(e1) // within list
-	l1.waitForInsertions()
 	checkListPointers(t, l1, []*element{e1, e4, e3})
 	checkListPointers(t, l2, []*element{e2})
 
 	l2.MoveToFront(e1) // from front
 	checkListPointers(t, l1, []*element{e4, e3})
-	l2.waitForInsertions()
 	checkListPointers(t, l2, []*element{e1, e2})
 
 	l2.MoveToFront(e3) // from back
 	checkListPointers(t, l1, []*element{e4})
-	l2.waitForInsertions()
 	checkListPointers(t, l2, []*element{e3, e1, e2})
 
 	l2.MoveToFront(e4) // only element
 	checkListPointers(t, l1, []*element{})
-	l2.waitForInsertions()
 	checkListPointers(t, l2, []*element{e4, e3, e1, e2})
 
 	l1.MoveToFront(e1) // return to original list
 	checkListPointers(t, l2, []*element{e4, e3, e2})
-	l1.waitForInsertions()
 	checkListPointers(t, l1, []*element{e1})
 }

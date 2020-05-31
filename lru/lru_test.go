@@ -222,8 +222,8 @@ func TestLRUContainsOrAdd(t *testing.T) {
 		t.Errorf("err: %v", err)
 	}
 
-	l.Add(1, 1)
-	l.Add(2, 2)
+	l.Add("1", 1)
+	l.Add("2", 2)
 	// contains, evict := l.ContainsOrAdd(1, 1)
 	// if !contains {
 	// 	t.Errorf("1 should be contained")
@@ -253,8 +253,8 @@ func TestLRUPeekOrAdd(t *testing.T) {
 		t.Errorf("err: %v", err)
 	}
 
-	l.Add(1, 1)
-	l.Add(2, 2)
+	l.Add("1", 1)
+	l.Add("2", 2)
 	// previous, contains, evict := l.PeekOrAdd(1, 1)
 	// if !contains {
 	// 	t.Errorf("1 should be contained")
@@ -287,16 +287,20 @@ func TestLRUPeek(t *testing.T) {
 		t.Errorf("err: %v", err)
 	}
 
-	l.Add(1, 1)
-	l.Add(2, 2)
-	// if v, ok := l.Peek(1); !ok || v != 1 {
-	// 	t.Errorf("1 should be set to 1: %v, %v", v, ok)
-	// }
+	l.Add("1", 1)
+	l.Add("2", 2)
+	if v, ok := l.Peek("1"); !ok || v != 1 {
+		t.Errorf("1 should be set to 1: %v, %v", v, ok)
+	}
 
-	// l.Add(3, 3)
-	// if l.Contains(1) {
-	// 	t.Errorf("should not have updated recent-ness of 1")
-	// }
+	l.Add("3", 3)
+	for l.items.Count() > 2 {
+		// Wait for eviction to be handled
+		runtime.Gosched()
+	}
+	if l.Contains("1") {
+		t.Errorf("Contains should not have updated recent-ness of 1")
+	}
 }
 
 // test that Resize can upsize and downsize
@@ -312,8 +316,8 @@ func TestLRUResize(t *testing.T) {
 	}
 
 	// Downsize
-	l.Add(1, 1)
-	l.Add(2, 2)
+	l.Add("1", 1)
+	l.Add("2", 2)
 	// evicted := l.Resize(1)
 	// if evicted != 1 {
 	// 	t.Errorf("1 element should have been evicted: %v", evicted)

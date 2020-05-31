@@ -9,8 +9,6 @@ import (
 	cmap "github.com/orcaman/concurrent-map"
 )
 
-//	"github.com/hashicorp/golang-lru/blob/master/simplelru"
-
 // LRU is a thread-safe least-recently used cache
 type LRU struct {
 	capacity int
@@ -131,6 +129,7 @@ func (c *LRU) Add(key, value interface{}) bool {
 	v := c.items.Upsert(keyStr, value,
 		func(exist bool, valueInMap, newValue interface{}) interface{} {
 			if exist {
+				// TODO: I think it would be better if the items were immutable
 				// Update existing node
 				v := valueInMap.(item)
 				// If the move to front fails, the item is being evicted,
@@ -191,8 +190,17 @@ func (c *LRU) Contains(key interface{}) (ok bool) {
 	return false
 }
 
-// // Returns key's value without updating the "recently used"-ness of the key.
-// Peek(key interface{}) (value interface{}, ok bool)
+// Peek returns key's value without updating the "recently used"-ness of the key.
+func (c *LRU) Peek(key interface{}) (value interface{}, ok bool) {
+	keyStr, ok := key.(string)
+	if ok {
+		mapEntry, ok := c.items.Get(keyStr)
+		if ok {
+			return mapEntry.(*item).value, true
+		}
+	}
+	return nil, false
+}
 
 // // Removes a key from the cache.
 // Remove(key interface{}) bool

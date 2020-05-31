@@ -74,7 +74,7 @@ func (c *LRU) cleanupWorker() {
 	defer c.cleanup.L.Unlock()
 
 	for {
-			c.cleanup.L.Unlock()
+		c.cleanup.L.Unlock()
 
 		// Under heavy load, operate lock free (at least for the cleanup mutex)
 		for n := c.Len(); n > c.capacity; n = c.Len() {
@@ -107,7 +107,7 @@ func (c *LRU) cleanupWorker() {
 		}
 
 		// Perform one final check under lock before we go to sleep or exit
-			c.cleanup.L.Lock()
+		c.cleanup.L.Lock()
 		if c.Len() > c.capacity {
 			continue // Someone inserted something before we locked, carry on
 		} else if c.capacity > 0 {
@@ -181,8 +181,15 @@ func (c *LRU) Get(key interface{}) (value interface{}, ok bool) {
 	return nil, false
 }
 
-// // Checks if a key exists in cache without updating the recent-ness.
-// Contains(key interface{}) (ok bool)
+// Contains checks if a key exists in cache without updating the recent-ness.
+func (c *LRU) Contains(key interface{}) (ok bool) {
+	keyStr, ok := key.(string)
+	if ok {
+		_, ok := c.items.Get(keyStr)
+		return ok
+	}
+	return false
+}
 
 // // Returns key's value without updating the "recently used"-ness of the key.
 // Peek(key interface{}) (value interface{}, ok bool)
